@@ -13,10 +13,15 @@ export HOST_GID := $(shell id -g)
 IMAGE_NAME := iac-toolbox
 TOKEN_FILE := .github_token
 
-# Default Docker Runtime Configuration
-DOCKER_RUN := docker run -it --rm \
+# 1. Detect if we are in a real terminal (TTY) AND NOT in a CI environment
+# [ -t 0 ] checks if stdin is a terminal.
+# [ -z "$$CI" ] ensures we aren't in GitHub Actions (where CI=true).
+IS_TTY := $(shell [ -t 0 ] && [ -z "$$CI" ] && echo "-it" || echo "")
+
+# 2. Use the variable in your Docker command
+DOCKER_RUN := docker run $(IS_TTY) --rm \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v ~/.docker/config.json:/root/.docker/config.json \
+    $(shell [ -f ~/.docker/config.json ] && echo "-v ~/.docker/config.json:/root/.docker/config.json") \
     -v $(shell pwd):/workbench \
     -e HOST_UID=$(HOST_UID) \
     -e HOST_GID=$(HOST_GID) \
