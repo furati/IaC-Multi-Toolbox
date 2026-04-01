@@ -60,9 +60,11 @@ RUN apk add --no-cache \
     apk del py3-pip && \
     # Aggressive Cleanup of Python bytecode and temp files
     find /usr/lib/python* -name __pycache__ -exec rm -rf {} + && \
-    rm -rf /root/.cache /tmp/* && \
-    # Install the required Ansible collection for Docker
-    ansible-galaxy collection install community.docker
+    rm -rf /root/.cache /tmp/*
+
+# Install the required Ansible collection for Docker
+RUN ansible-galaxy collection install community.docker
+
 
 # 2. Copy binaries from official sources and builder stage
 COPY --from=hashicorp/terraform:latest /bin/terraform /usr/local/bin/terraform
