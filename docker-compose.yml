@@ -1,0 +1,19 @@
+services:
+  toolbox:
+    build:
+      context: .
+      args:
+        TERRAFORM_VERSION: ${TF_VER}
+        PACKER_VERSION: ${PK_VER}
+        ANSIBLE_VERSION: ${ANS_VER}
+        PYTHON_VERSION: ${PY_VER}
+        GOVC_VERSION: ${GV_VER}
+    image: iac-toolbox:latest
+    container_name: iac-toolbox
+    volumes:
+      - .:/workbench:delegated
+    environment:
+      - HOST_UID=${UID}
+      - HOST_GID=${GID}
+    stdin_open: true
+    tty: true

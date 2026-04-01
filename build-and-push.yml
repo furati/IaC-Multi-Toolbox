@@ -1,0 +1,65 @@
+---
+- name: Build and Push IaC Toolbox
+  hosts: localhost
+  connection: local
+  vars:
+    image_name: "iac-toolbox"
+    github_user: "furati"
+    govc_version: "v0.35.0"
+
+  tasks:
+    - name: "Dynamic Version Discovery: Terraform"
+      shell: "docker run --rm hashicorp/terraform:latest version -json | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+      register: tf_ver_cmd
+      changed_when: false
+
+    - name: "Dynamic Version Discovery: Packer"
+      shell: "docker run --rm hashicorp/packer:latest version | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+      register: pk_ver_cmd
+      changed_when: false
+
+    - name: "Dynamic Version Discovery: Ansible & Python (via Alpine)"
+      shell: 'docker run --rm alpine:latest sh -c "apk add --no-cache ansible > /dev/null && ansible --version" | head -n 1 | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+"'
+      register: ans_ver_cmd
+      changed_when: false
+
+    - name: "Set Version Facts"
+      set_fact:
+        tf_ver: "{{ tf_ver_cmd.stdout }}"
+        pk_ver: "{{ pk_ver_cmd.stdout }}"
+        ans_ver: "{{ ans_ver_cmd.stdout }}"
+
+    - name: "Build Docker Image with OCI Labels"
+      community.docker.docker_image:
+        name: "{{ image_name }}"
+        build:
+          path: .
+          args:
+            TERRAFORM_VERSION: "{{ tf_ver }}"
+            PACKER_VERSION: "{{ pk_ver }}"
+            ANSIBLE_VERSION: "{{ ans_ver }}"
+            GOVC_VERSION: "{{ govc_version }}"
+            REPO_URL: "https://github.com/{{ github_user }}/{{ image_name }}"
+        source: build
+        force_source: yes
+      register: build_result
+
+    - name: "Authenticate with GHCR"
+      community.docker.docker_login:
+        registry_url: ghcr.io
+        username: "{{ github_user }}"
+        password: "{{ gh_token }}"
+        reauthorize: yes
+
+    - name: "Tag and Push to GitHub Container Registry (GHCR)"
+      community.docker.docker_image:
+        # 'name' refers to the local source image built in the previous step
+        name: "{{ image_name }}:latest"
+        # 'repository' defines the target path in the registry
+        repository: "ghcr.io/{{ github_user }}/{{ image_name }}"
+        tag: "{{ item }}"
+        push: yes
+        source: local
+      loop:
+        - "latest"
+        - "{{ tf_ver }}-ansible-{{ ans_ver }}"

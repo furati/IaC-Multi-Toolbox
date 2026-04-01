@@ -1,0 +1,36 @@
+# === Security / Credentials ===
+# This is the file containing your GitHub Personal Access Token (PAT)
+.github_token
+# Standard secret files
+*.key
+*.pem
+*.token
+.env
+
+# === Docker & Infrastructure ===
+# Ignore local docker-compose overrides and state
+docker-compose.override.yml
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+
+# === System Files (macOS) ===
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# === Development & Logs ===
+*.log
+.idea/
+.vscode/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Build Artifacts ===
+# If you ever export images to tarballs
+*.tar
+*.tar.gz
