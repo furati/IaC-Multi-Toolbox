@@ -13,15 +13,15 @@ export HOST_GID := $(shell id -g)
 IMAGE_NAME := iac-toolbox
 TOKEN_FILE := .github_token
 
-# 1. Detect if we are in a real terminal (TTY) AND NOT in a CI environment
-# [ -t 0 ] checks if stdin is a terminal.
-# [ -z "$$CI" ] ensures we aren't in GitHub Actions (where CI=true).
-IS_TTY := $(shell [ -t 0 ] && [ -z "$$CI" ] && echo "-it" || echo "")
+# 1. Robust TTY Detection
+# We check if we are in a terminal AND not in a CI environment (GitHub Actions)
+INTERACTIVE := $(shell [ -t 0 ] && [ -z "$$GITHUB_ACTIONS" ] && echo "-it" || echo "")
 
-# 2. Use the variable in your Docker command
-DOCKER_RUN := docker run $(IS_TTY) --rm \
+# 2. Base Docker Command (Without -it)
+# We use this as a template for all commands
+DOCKER_BASE := docker run --rm \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    $(shell [ -f ~/.docker/config.json ] && echo "-v ~/.docker/config.json:/root/.docker/config.json") \
+    $(shell [ -f $(HOME)/.docker/config.json ] && echo "-v $(HOME)/.docker/config.json:/root/.docker/config.json") \
     -v $(shell pwd):/workbench \
     -e HOST_UID=$(HOST_UID) \
     -e HOST_GID=$(HOST_GID) \
@@ -29,7 +29,6 @@ DOCKER_RUN := docker run $(IS_TTY) --rm \
 
 .PHONY: help build run push clean
 
-# Default Target: Displays Help Menu
 help: ## Display this help information
 	@echo "-----------------------------------------------------------------------"
 	@echo "IaC Multi-Toolbox - Available Commands:"
@@ -49,9 +48,8 @@ build: ## Build the Docker image locally with upstream tool versions
 		--build-arg GOVC_VERSION=$(GV_VER) .
 
 run: ## Launch an interactive shell session within the toolbox
-	$(DOCKER_RUN) /bin/sh
+	$(DOCKER_BASE) $(INTERACTIVE) /bin/sh
 
-# Ensure this is at the top of your push target
 push: ## Execute the Ansible workflow (Tagging & GHCR Push)
 	@if [ -n "$(GITHUB_TOKEN)" ]; then \
 		TOKEN="$(GITHUB_TOKEN)"; \
@@ -66,7 +64,7 @@ push: ## Execute the Ansible workflow (Tagging & GHCR Push)
 		echo "ERROR: Authentication token is required."; exit 1; \
 	fi; \
 	echo "--- Starting Push Workflow ---"; \
-	$(DOCKER_RUN) ansible-playbook build-and-push.yml -e "gh_token=$$TOKEN"
+	$(DOCKER_BASE) ansible-playbook build-and-push.yml -e "gh_token=$$TOKEN"
 
 clean: ## Remove local image and prune dangling Docker layers
-	docker rmi $(IMAGE_NAME) 2>/dev/null
+	docker rmi $(IMAGE_NAME) 2>/dev/null || true
