@@ -46,21 +46,22 @@ build: ## Build the Docker image locally with upstream tool versions
 run: ## Launch an interactive shell session within the toolbox
 	$(DOCKER_RUN) /bin/sh
 
+# Ensure this is at the top of your push target
 push: ## Execute the Ansible workflow (Tagging & GHCR Push)
 	@if [ -n "$(GITHUB_TOKEN)" ]; then \
-		GH_TOKEN="$(GITHUB_TOKEN)"; \
+		TOKEN="$(GITHUB_TOKEN)"; \
 	elif [ -f $(TOKEN_FILE) ]; then \
-		GH_TOKEN=$$(cat $(TOKEN_FILE)); \
+		TOKEN=$$(cat $(TOKEN_FILE)); \
 	else \
-		echo "No token found in ENV or $(TOKEN_FILE)."; \
-		read -p "Please enter your GitHub PAT: " secret; \
-		GH_TOKEN=$$secret; \
+		echo "No token found. Please enter your GitHub PAT: "; \
+		read secret; \
+		TOKEN=$$secret; \
 	fi; \
-	if [ -z "$$GH_TOKEN" ]; then \
-		echo "ERROR: Authentication token is required for push."; exit 1; \
+	if [ -z "$$TOKEN" ]; then \
+		echo "ERROR: Authentication token is required."; exit 1; \
 	fi; \
 	echo "--- Starting Push Workflow ---"; \
-	$(DOCKER_RUN) ansible-playbook build-and-push.yml -e "gh_token=$$GH_TOKEN"
+	$(DOCKER_RUN) ansible-playbook build-and-push.yml -e "gh_token=$$TOKEN"
 
 clean: ## Remove local image and prune dangling Docker layers
 	docker rmi $(IMAGE_NAME) 2>/dev/null
