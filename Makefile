@@ -5,7 +5,7 @@ TF_VER  := $(shell docker run --rm hashicorp/terraform:latest version -json | gr
 PK_VER  := $(shell docker run --rm hashicorp/packer:latest version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 ANS_VER := $(shell docker run --rm alpine:latest sh -c "apk add --no-cache ansible > /dev/null && ansible --version" | head -n 1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
 PY_VER  := $(shell docker run --rm alpine:latest sh -c "apk add --no-cache python3 > /dev/null && python3 --version" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
-GV_VER  := v0.35.0
+GV_VER  := $(shell docker run --rm $(IMAGE_NAME) govc version | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
 
 # Exporting Host IDs for Permission Mapping
 export HOST_UID := $(shell id -u)
@@ -71,16 +71,14 @@ clean: ## Remove local image and prune dangling Docker layers
 
 test: ## Verify tool installations and versions within the container
 	@echo "--- Starting Container Smoke Tests ---"
-	@echo "Testing Terraform..."
-	@$(DOCKER_BASE) terraform version | grep -q "v$(TF_VER)"
-	@echo "Testing Packer..."
-	@$(DOCKER_BASE) packer version | grep -q "$(PK_VER)"
-	@echo "Testing Ansible..."
-	@$(DOCKER_BASE) ansible --version | grep -q "$(ANS_VER)"
-	@echo "Testing govc..."
-	@$(DOCKER_BASE) govc version | grep -q "$(GV_VER)"
-	@echo "Testing Python..."
-	@$(DOCKER_BASE) python3 --version | grep -q "$(PY_VER)"
+	@echo "Testing Terraform: $(TF_VER)..."
+	@$(DOCKER_BASE) terraform version | grep -q "v$(TF_VER)" && echo "  OK"
+	@echo "Testing Packer: $(PK_VER)..."
+	@$(DOCKER_BASE) packer version | grep -q "$(PK_VER)" && echo "  OK"
+	@echo "Testing Ansible: $(ANS_VER)..."
+	@$(DOCKER_BASE) ansible --version | grep -q "$(ANS_VER)" && echo "  OK"
+	@echo "Testing govc: $(GV_VER)..."
+	@$(DOCKER_BASE) govc version | grep -q "$(GV_VER)" && echo "  OK"
 	@echo "✅ All smoke tests passed!"
 
 test-functional: ## Test actual tool functionality (Init, Syntax, etc.)

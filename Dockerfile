@@ -46,21 +46,23 @@ LABEL org.opencontainers.image.title="IaC Multi-Toolbox" \
 
 # 1. Install System Tools and Python Libraries for Ansible
 RUN apk add --no-cache \
-    ansible \
+    ansible-core \
     openssh-client \
     git \
     ca-certificates \
     su-exec \
     python3 \
     py3-pip \
-    docker-cli
+    docker-cli && \
+    # Install Python deps and immediately clean up
+    pip install --no-cache-dir --break-system-packages requests docker && \
+    # Uninstall pip to save space, but keep python3 for Ansible
+    apk del py3-pip && \
+    # Aggressive Cleanup of Python bytecode and temp files
+    find /usr/lib/python* -name __pycache__ -exec rm -rf {} + && \
+    rm -rf /root/.cache /tmp/*
 
-# 2. Install Python dependencies for the Ansible Docker Module
-# Note: --break-system-packages is used as Alpine strictly manages pip.
-# This is safe and standard practice within isolated containers.
-RUN pip install --no-cache-dir --break-system-packages requests docker
-
-# 3. Copy binaries from official sources and builder stage
+# 2. Copy binaries from official sources and builder stage
 COPY --from=hashicorp/terraform:latest /bin/terraform /usr/local/bin/terraform
 COPY --from=hashicorp/packer:latest /bin/packer /usr/local/bin/packer
 COPY --from=builder /usr/local/bin/govc /usr/local/bin/govc
