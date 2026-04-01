@@ -8,8 +8,8 @@ on:
 jobs:
     build-and-deploy:
         runs-on: ubuntu-latest
-        # This silences the deprecation warning and future-proofs the runner
         env:
+            # Future-proofing the runner for the 2026 Node.js migration
             FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
             GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
@@ -19,7 +19,7 @@ jobs:
 
         steps:
             - name: Checkout Repository
-              uses: actions/checkout@v4 # Should now run on Node 24 via the env var
+              uses: actions/checkout@v4
 
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
@@ -31,7 +31,16 @@ jobs:
                   username: ${{ github.actor }}
                   password: ${{ secrets.GH_TOKEN }}
 
-            - name: Run Build and Push via Makefile
-              run: |
-                  make build
-                  make push
+            - name: Run Build
+              run: make build
+
+            - name: Run Smoke Tests
+              # If any command in 'make test' returns a non-zero exit code,
+              # the pipeline stops here and the push never happens.
+              run: make test
+
+            - name: Run Functional Tests (Deep check)
+              run: make test-functional
+
+            - name: Run Push
+              run: make push

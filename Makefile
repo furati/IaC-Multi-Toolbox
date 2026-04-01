@@ -68,3 +68,27 @@ push: ## Execute the Ansible workflow (Tagging & GHCR Push)
 
 clean: ## Remove local image and prune dangling Docker layers
 	docker rmi $(IMAGE_NAME) 2>/dev/null || true
+
+test: ## Verify tool installations and versions within the container
+	@echo "--- Starting Container Smoke Tests ---"
+	@echo "Testing Terraform..."
+	@$(DOCKER_BASE) terraform version | grep -q "v$(TF_VER)"
+	@echo "Testing Packer..."
+	@$(DOCKER_BASE) packer version | grep -q "$(PK_VER)"
+	@echo "Testing Ansible..."
+	@$(DOCKER_BASE) ansible --version | grep -q "$(ANS_VER)"
+	@echo "Testing govc..."
+	@$(DOCKER_BASE) govc version | grep -q "$(GV_VER)"
+	@echo "Testing Python..."
+	@$(DOCKER_BASE) python3 --version | grep -q "$(PY_VER)"
+	@echo "✅ All smoke tests passed!"
+
+test-functional: ## Test actual tool functionality (Init, Syntax, etc.)
+	@echo "--- Starting Functional Tests ---"
+	@echo "Testing Terraform provider initialization..."
+	@$(DOCKER_BASE) sh -c 'echo "provider \"local\" {}" > test.tf && terraform init && rm -rf .terraform* test.tf'
+	@echo "Testing Ansible playbook syntax check..."
+	@$(DOCKER_BASE) ansible-playbook build-and-push.yml --syntax-check
+	@echo "Testing Packer syntax..."
+	@$(DOCKER_BASE) packer --version
+	@echo "✅ All functional tests passed!"
