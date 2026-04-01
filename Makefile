@@ -47,10 +47,12 @@ run: ## Launch an interactive shell session within the toolbox
 	$(DOCKER_RUN) /bin/sh
 
 push: ## Execute the Ansible workflow (Tagging & GHCR Push)
-	@if [ -f $(TOKEN_FILE) ]; then \
+	@if [ -n "$(GITHUB_TOKEN)" ]; then \
+		GH_TOKEN="$(GITHUB_TOKEN)"; \
+	elif [ -f $(TOKEN_FILE) ]; then \
 		GH_TOKEN=$$(cat $(TOKEN_FILE)); \
 	else \
-		echo "GitHub Token file ($(TOKEN_FILE)) not found."; \
+		echo "No token found in ENV or $(TOKEN_FILE)."; \
 		read -p "Please enter your GitHub PAT: " secret; \
 		GH_TOKEN=$$secret; \
 	fi; \
