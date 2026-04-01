@@ -1,0 +1,35 @@
+name: Build and Push IaC Toolbox
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch: # Allows manual triggering from the UI
+
+jobs:
+    build-and-deploy:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            packages: write
+
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v4
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GH_TOKEN }}
+
+            - name: Run Build and Push via Makefile
+              # We use the Makefile to ensure consistency between local and CI
+              run: |
+                  make build
+                  make push
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
