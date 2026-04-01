@@ -3,18 +3,23 @@ name: Build and Push IaC Toolbox
 on:
     push:
         branches: [main]
-    workflow_dispatch: # Allows manual triggering from the UI
+    workflow_dispatch:
 
 jobs:
     build-and-deploy:
         runs-on: ubuntu-latest
+        # This silences the deprecation warning and future-proofs the runner
+        env:
+            FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+            GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
         permissions:
             contents: read
             packages: write
 
         steps:
             - name: Checkout Repository
-              uses: actions/checkout@v4
+              uses: actions/checkout@v4 # Should now run on Node 24 via the env var
 
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
@@ -27,9 +32,6 @@ jobs:
                   password: ${{ secrets.GH_TOKEN }}
 
             - name: Run Build and Push via Makefile
-              # We use the Makefile to ensure consistency between local and CI
               run: |
                   make build
                   make push
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
