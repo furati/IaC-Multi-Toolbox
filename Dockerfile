@@ -62,23 +62,27 @@ RUN apk add --no-cache \
     find /usr/lib/python* -name __pycache__ -exec rm -rf {} + && \
     rm -rf /root/.cache /tmp/*
 
-# Install the required Ansible collection for Docker
-RUN ansible-galaxy collection install community.docker
+# 2. Install Ansible collection to a global, readable path
+RUN mkdir -p /usr/share/ansible/collections && \
+    ansible-galaxy collection install community.docker -p /usr/share/ansible/collections && \
+    chmod -R 755 /usr/share/ansible/collections
 
+# 3. Ensure Ansible knows where to look
+ENV ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections
 
-# 2. Copy binaries from official sources and builder stage
+# 4. Copy binaries from official sources and builder stage
 COPY --from=hashicorp/terraform:latest /bin/terraform /usr/local/bin/terraform
 COPY --from=hashicorp/packer:latest /bin/packer /usr/local/bin/packer
 COPY --from=builder /usr/local/bin/govc /usr/local/bin/govc
 
-# Set the primary working directory
+# 5. Set the primary working directory
 WORKDIR /workbench
 
-# 4. Configure Entrypoint
+# 6. Configure Entrypoint
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
-# Default command if no arguments are provided
+# 7. Default command if no arguments are provided
 CMD ["/bin/sh"]
