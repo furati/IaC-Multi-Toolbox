@@ -34,3 +34,4 @@ yarn-error.log*
 # If you ever export images to tarballs
 *.tar
 *.tar.gz
+GH_Token
