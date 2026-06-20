@@ -1,0 +1,70 @@
+---
+name: Auto-update tools
+
+on:
+  schedule:
+    # Daily at 06:17 UTC (off the hour to avoid cron congestion).
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.decide.outputs.changed }}
+      version_tag: ${{ steps.decide.outputs.version_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Discover latest tool versions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/discover-versions.sh all >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Decide whether a new image is needed
+        id: decide
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/iac-toolbox
+        run: |
+          TAG="$(./scripts/discover-versions.sh tag)"
+          echo "version_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Latest versions resolve to tag: ${TAG}"
+          if docker manifest inspect "${IMAGE}:${TAG}" >/dev/null 2>&1; then
+            echo "Image ${IMAGE}:${TAG} already published — nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New tool versions detected — a build is required."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      publish: true
+
+  summary:
+    needs: [check, publish]
+    if: always() && needs.check.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "### Auto-update result"
+            echo "Tag: \`${{ needs.check.outputs.version_tag }}\`"
+            echo "Publish outcome: ${{ needs.publish.result }}"
+          } >> "$GITHUB_STEP_SUMMARY"

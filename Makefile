@@ -3,24 +3,22 @@
 # ==========================================
 IMAGE_NAME := iac-toolbox
 TOKEN_FILE := .github_token
-
-# Pinned Alpine release. apk-provided tools (ansible-core, python3, ansible-lint,
-# yamllint) are discovered from *this same* image so the labels are accurate and
-# the build is reproducible. Bump deliberately, then re-run `make build`.
-ALPINE_VER := 3.22
+DISCOVER   := ./scripts/discover-versions.sh
 
 # ==========================================
-# Dynamic Tool Version Discovery
-# Terraform/Packer/govc/tflint track latest upstream; apk tools track ALPINE_VER.
-# The discovered versions are passed as build args and pinned inside the image.
+# Dynamic Tool Version Discovery (single source of truth: scripts/)
+# Terraform/Packer/govc/tflint track latest upstream; apk tools track the
+# pinned Alpine release. Discovered versions are passed as build args and
+# pinned inside the image, so a given build is fully reproducible.
 # ==========================================
-TF_VER  := $(shell docker run --rm hashicorp/terraform:latest version -json | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-PK_VER  := $(shell docker run --rm hashicorp/packer:latest version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-ANS_VER := $(shell docker run --rm alpine:$(ALPINE_VER) sh -c "apk add --no-cache ansible-core > /dev/null && ansible --version" | head -n 1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
-PY_VER  := $(shell docker run --rm alpine:$(ALPINE_VER) sh -c "apk add --no-cache python3 > /dev/null && python3 --version" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
-GV_VER  := $(shell curl -fsSL https://api.github.com/repos/vmware/govmomi/releases/latest | grep -oE '"tag_name": *"v[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
-AL_VER  := $(shell docker run --rm alpine:$(ALPINE_VER) sh -c "apk add --no-cache ansible-lint > /dev/null && ansible-lint --version" | head -n 1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
-TFL_VER := $(shell curl -fsSL https://api.github.com/repos/terraform-linters/tflint/releases/latest | grep -oE '"tag_name": *"v[0-9]+\.[0-9]+\.[0-9]+"' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+ALPINE_VER := $(shell $(DISCOVER) alpine)
+TF_VER     := $(shell $(DISCOVER) terraform)
+PK_VER     := $(shell $(DISCOVER) packer)
+ANS_VER    := $(shell $(DISCOVER) ansible)
+PY_VER     := $(shell $(DISCOVER) python)
+GV_VER     := $(shell $(DISCOVER) govc)
+AL_VER     := $(shell $(DISCOVER) ansible-lint)
+TFL_VER    := $(shell $(DISCOVER) tflint)
 
 # Exporting Host IDs for Permission Mapping
 export HOST_UID := $(shell id -u)

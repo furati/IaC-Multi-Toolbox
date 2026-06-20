@@ -1,0 +1,25 @@
+---
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-test-publish:
+    # Publish on push to main and manual runs; pull requests only build + test.
+    uses: ./.github/workflows/build.yml
+    with:
+      publish: ${{ github.event_name != 'pull_request' }}
