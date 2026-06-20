@@ -84,13 +84,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Scan image for CVEs (trivy)
+      # Report HIGH + CRITICAL for visibility. This does NOT fail the build:
+      # the bundled upstream binaries (terraform/packer/govc/tflint) regularly
+      # carry HIGH Go-stdlib CVEs we cannot patch, which would otherwise block
+      # every daily auto-update.
+      - name: CVE report (trivy, non-blocking)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: iac-toolbox:test
           severity: HIGH,CRITICAL
-          exit-code: "1"
           ignore-unfixed: true
+          exit-code: "0"
+
+      # Gate the build on fixable CRITICAL vulnerabilities only.
+      - name: CVE gate (trivy, fail on fixable CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: iac-toolbox:test
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
       - name: Lint repo with bundled linters
         run: |

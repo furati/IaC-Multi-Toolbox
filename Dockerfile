@@ -86,7 +86,10 @@ LABEL org.opencontainers.image.title="IaC Multi-Toolbox" \
     org.opencontainers.image.vendor="Ralf Buhlrich <ralf@buhlrich.com>"
 
 # 1. Install System Tools and Python Libraries for Ansible
-RUN apk add --no-cache \
+# `apk upgrade` first pulls security fixes for base-image packages (e.g. openssl)
+# that `apk add` alone would not refresh.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache \
     ansible-core \
     ansible-lint \
     yamllint \

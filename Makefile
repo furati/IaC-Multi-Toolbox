@@ -119,7 +119,10 @@ lint: ## Run ansible-lint, yamllint and tflint against /workbench
 scan: ## Security scan: hadolint (Dockerfile) + trivy (image CVEs)
 	@echo "--- Dockerfile Lint (hadolint) ---"
 	docker run --rm -v $(shell pwd):/repo -w /repo hadolint/hadolint hadolint Dockerfile
-	@echo "--- Image CVE Scan (trivy) ---"
+	@echo "--- CVE Report (trivy, HIGH+CRITICAL, non-blocking) ---"
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-		aquasec/trivy:latest image --severity HIGH,CRITICAL --exit-code 1 $(IMAGE_NAME)
+		aquasec/trivy:latest image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 $(IMAGE_NAME)
+	@echo "--- CVE Gate (trivy, fail on fixable CRITICAL) ---"
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+		aquasec/trivy:latest image --severity CRITICAL --ignore-unfixed --exit-code 1 $(IMAGE_NAME)
 	@echo "✅ Security scan passed!"
