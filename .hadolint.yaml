@@ -1,0 +1,10 @@
+---
+# hadolint configuration.
+# We deliberately do NOT pin apk/pip package versions in the Dockerfile:
+# reproducibility is achieved by pinning the Alpine base image (ALPINE_VERSION),
+# which fixes every apk-provided package version for a given release.
+ignored:
+  - DL3018  # Pin versions in apk add — handled via pinned ALPINE_VERSION
+  - DL3013  # Pin versions in pip — runtime libs for ansible community.docker
+
+failure-threshold: warning

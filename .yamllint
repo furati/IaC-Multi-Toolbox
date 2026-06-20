@@ -1,0 +1,23 @@
+---
+# yamllint configuration for the IaC Multi-Toolbox repo.
+# Pragmatic defaults: readable line lengths, document-start required.
+extends: default
+
+rules:
+  # IaC playbooks often contain long single-line shell discovery commands.
+  line-length:
+    max: 200
+    level: warning
+  truthy:
+    allowed-values: ["true", "false", "yes", "no"]
+    # Do not flag keys like GitHub Actions' `on:` as truthy.
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  document-start:
+    present: true
+
+ignore: |
+  .terraform/
+  # Workflow files follow GitHub Actions conventions (lint with actionlint instead).
+  .github/

@@ -21,6 +21,11 @@ jobs:
             - name: Checkout Repository
               uses: actions/checkout@v4
 
+            - name: Lint Dockerfile (hadolint)
+              uses: hadolint/hadolint-action@v3.1.0
+              with:
+                  dockerfile: Dockerfile
+
             - name: Set up Docker Buildx
               uses: docker/setup-buildx-action@v3
 
@@ -33,6 +38,17 @@ jobs:
 
             - name: Run Build
               run: make build
+
+            - name: Run Linters (ansible-lint, yamllint, tflint)
+              run: make lint
+
+            - name: Scan Image for CVEs (trivy)
+              uses: aquasecurity/trivy-action@0.28.0
+              with:
+                  image-ref: iac-toolbox
+                  severity: HIGH,CRITICAL
+                  exit-code: "1"
+                  ignore-unfixed: true
 
             - name: Run Smoke Tests
               # If any command in 'make test' returns a non-zero exit code,

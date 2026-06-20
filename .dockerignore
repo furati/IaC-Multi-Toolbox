@@ -1,0 +1,22 @@
+# Keep the build context minimal and avoid leaking VCS/secrets into the image
+.git
+.github
+.gitignore
+.dockerignore
+README.md
+LICENSE
+Makefile
+docker-compose.yml
+build-and-push.yml
+
+# Secrets / credentials (defense in depth — also in .gitignore)
+.github_token
+*.key
+*.pem
+*.token
+.env
+
+# Local IaC state
+.terraform/
+*.tfstate
+*.tfstate.*

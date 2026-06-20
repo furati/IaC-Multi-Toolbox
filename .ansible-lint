@@ -1,0 +1,14 @@
+---
+# ansible-lint configuration.
+# See https://ansible.readthedocs.io/projects/lint/configuring/
+profile: basic
+
+exclude_paths:
+  - .github/
+  - .terraform/
+
+# The build playbook deliberately shells out to docker for version discovery;
+# command-instead-of-shell / no-changed-when noise there is expected.
+warn_list:
+  - command-instead-of-shell
+  - no-changed-when

@@ -24,6 +24,9 @@ A high-performance, minimalist containerized environment for **Infrastructure as
 | **Ansible** | Configuration Management & App Deployment |
 | **govc** | vSphere/ESXi CLI Management |
 | **Docker CLI** | Container Lifecycle Management |
+| **ansible-lint** | Ansible playbook/role best-practice linting |
+| **yamllint** | YAML style & syntax linting |
+| **tflint** | Terraform linting (errors, deprecations, provider rules) |
 
 -----
 
@@ -73,9 +76,28 @@ Simply run `make` to see all available options:
 ```text
 build           Build the Docker image locally with latest upstream versions
 run             Start an interactive shell session in the toolbox
+lint            Run ansible-lint, yamllint and tflint against /workbench
+scan            Security scan: hadolint (Dockerfile) + trivy (image CVEs)
 push            Execute the Ansible build-and-push workflow to GHCR
 clean           Remove local images and prune build cache
 ```
+
+### Linting & Security Scanning
+
+```bash
+# Lint mounted IaC code (Ansible + YAML + Terraform)
+make lint
+
+# Or call a linter directly inside the toolbox
+iac ansible-lint site.yml
+iac yamllint .
+iac tflint
+
+# Scan the Dockerfile and built image for issues (uses hadolint + trivy)
+make scan
+```
+
+> `make lint` and `make scan` also run automatically in the CI pipeline before any image is pushed to GHCR.
 
 ### Automated Deployment
 
