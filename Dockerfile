@@ -1,3 +1,7 @@
+# check=skip=InvalidDefaultArgInFrom
+# The version ARGs in the FROM lines are intentionally required (no default):
+# a bare `docker build` should fail loudly rather than silently use :latest.
+
 # ==========================================
 # Global build args (available to FROM lines below).
 # All versions are *required* and supplied by the Makefile / Ansible playbook,

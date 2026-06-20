@@ -8,14 +8,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref to save CI minutes.
+# Cancel superseded PR runs, but never abort an in-progress publish on main.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
   packages: write
+  security-events: write   # Trivy SARIF upload (in build.yml)
+  id-token: write          # cosign signing (in build.yml)
 
 jobs:
   build-test-publish:
