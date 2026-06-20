@@ -134,7 +134,10 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ github.token }}
+          # The package was originally created with the GH_TOKEN PAT, so it is
+          # not auto-linked to this repo's GITHUB_TOKEN. Prefer the PAT when set;
+          # fall back to GITHUB_TOKEN (works once the package is linked to the repo).
+          password: ${{ secrets.GH_TOKEN || github.token }}
 
       - name: Build & push multi-arch image
         if: ${{ inputs.publish }}

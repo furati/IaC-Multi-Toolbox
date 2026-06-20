@@ -31,7 +31,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ github.token }}
+          password: ${{ secrets.GH_TOKEN || github.token }}
 
       - name: Decide whether a new image is needed
         id: decide
@@ -55,6 +55,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       publish: true
+    secrets: inherit
 
   summary:
     needs: [check, publish]
