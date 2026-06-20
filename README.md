@@ -10,7 +10,7 @@ A high-performance, minimalist containerized environment for **Infrastructure as
 * **Multi-Arch Support:** Automatic detection and installation of `govc` for both `x86_64` and `arm64` (Apple Silicon).
 * **Dynamic Versioning:** The build system fetches the latest stable versions of Terraform, Packer, and Ansible at build time.
 * **UID/GID Mapping:** Seamless host-to-container permission handling. Files created in the container belong to your host user.
-* **DIND Capability:** Docker-CLI integration allows managing host Docker containers from within the toolbox.
+* **Docker-out-of-Docker:** The mounted host Docker socket lets you manage host containers from within the toolbox (the bundled Docker CLI talks to the host daemon).
 * **OCI Compliant:** Fully labeled according to OpenContainers standards for GitHub Packages integration.
 
 -----
@@ -132,8 +132,19 @@ the tag changes, the build runs through the full test suite, and the new image i
 published to `:latest` and the version tag. The **registry is the only state** —
 there is no lockfile to maintain.
 
-Every published image is built for **linux/amd64 + linux/arm64** and ships with
-SBOM and provenance attestations.
+Every published image is built for **linux/amd64 + linux/arm64**, ships with
+SBOM and provenance attestations, and is **signed with cosign** (keyless/OIDC).
+Trivy results are uploaded to the repository **Security tab**.
+
+### Verifying an image
+
+```bash
+cosign verify ghcr.io/furati/iac-toolbox:latest \
+  --certificate-identity-regexp 'https://github.com/furati/IaC-Multi-Toolbox/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+GitHub Actions are pinned to commit SHAs and kept current by Dependabot.
 
 -----
 

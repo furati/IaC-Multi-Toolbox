@@ -5,56 +5,27 @@
   vars:
     image_name: "iac-toolbox"
     github_user: "furati"
-    # Pinned Alpine release (keep in sync with the Makefile's ALPINE_VER).
-    alpine_version: "3.22"
 
   tasks:
-    - name: "Dynamic Version Discovery: Terraform"
-      shell: "docker run --rm hashicorp/terraform:latest version -json | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
-      register: tf_ver_cmd
+    # Version discovery is centralised in scripts/discover-versions.sh so the
+    # Makefile, the CI workflows and this playbook can never drift apart.
+    - name: "Discover all tool versions (shared script)"
+      ansible.builtin.command: ./scripts/discover-versions.sh all
+      register: discover
       changed_when: false
 
-    - name: "Dynamic Version Discovery: Packer"
-      shell: "docker run --rm hashicorp/packer:latest version | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
-      register: pk_ver_cmd
+    - name: "Parse discovered versions into a dict"
+      ansible.builtin.set_fact:
+        versions: >-
+          {{ ('{' + (discover.stdout_lines
+             | map('regex_replace', '^([^=]+)=(.*)$', '"\1": "\2"')
+             | join(', ')) + '}') | from_json }}
+
+    - name: "Compute the image version tag (shared script)"
+      ansible.builtin.command: ./scripts/discover-versions.sh tag
+      environment: "{{ versions }}"
+      register: tag_cmd
       changed_when: false
-
-    - name: "Dynamic Version Discovery: ansible-core (via pinned Alpine)"
-      shell: 'docker run --rm alpine:{{ alpine_version }} sh -c "apk add --no-cache ansible-core > /dev/null && ansible --version" | head -n 1 | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+"'
-      register: ans_ver_cmd
-      changed_when: false
-
-    - name: "Dynamic Version Discovery: Python (via pinned Alpine)"
-      shell: 'docker run --rm alpine:{{ alpine_version }} sh -c "apk add --no-cache python3 > /dev/null && python3 --version" | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+"'
-      register: py_ver_cmd
-      changed_when: false
-
-    - name: "Dynamic Version Discovery: ansible-lint (via pinned Alpine)"
-      shell: 'docker run --rm alpine:{{ alpine_version }} sh -c "apk add --no-cache ansible-lint > /dev/null && ansible-lint --version" | head -n 1 | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+" | head -1'
-      register: al_ver_cmd
-      changed_when: false
-
-    - name: "Dynamic Version Discovery: tflint (GitHub latest release)"
-      ansible.builtin.uri:
-        url: https://api.github.com/repos/terraform-linters/tflint/releases/latest
-        return_content: true
-      register: tflint_release
-
-    - name: "Dynamic Version Discovery: govc (GitHub latest release)"
-      ansible.builtin.uri:
-        url: https://api.github.com/repos/vmware/govmomi/releases/latest
-        return_content: true
-      register: govc_release
-
-    - name: "Set Version Facts"
-      set_fact:
-        tf_ver: "{{ tf_ver_cmd.stdout }}"
-        pk_ver: "{{ pk_ver_cmd.stdout }}"
-        ans_ver: "{{ ans_ver_cmd.stdout }}"
-        py_ver: "{{ py_ver_cmd.stdout }}"
-        al_ver: "{{ al_ver_cmd.stdout }}"
-        tflint_ver: "{{ tflint_release.json.tag_name | regex_replace('^v', '') }}"
-        govc_version: "{{ govc_release.json.tag_name }}"
 
     - name: "Build Docker Image with OCI Labels"
       community.docker.docker_image:
@@ -62,14 +33,14 @@
         build:
           path: .
           args:
-            TERRAFORM_VERSION: "{{ tf_ver }}"
-            PACKER_VERSION: "{{ pk_ver }}"
-            ANSIBLE_VERSION: "{{ ans_ver }}"
-            PYTHON_VERSION: "{{ py_ver }}"
-            GOVC_VERSION: "{{ govc_version }}"
-            TFLINT_VERSION: "{{ tflint_ver }}"
-            ANSIBLE_LINT_VERSION: "{{ al_ver }}"
-            ALPINE_VERSION: "{{ alpine_version }}"
+            TERRAFORM_VERSION: "{{ versions.TERRAFORM_VERSION }}"
+            PACKER_VERSION: "{{ versions.PACKER_VERSION }}"
+            ANSIBLE_VERSION: "{{ versions.ANSIBLE_VERSION }}"
+            PYTHON_VERSION: "{{ versions.PYTHON_VERSION }}"
+            GOVC_VERSION: "{{ versions.GOVC_VERSION }}"
+            TFLINT_VERSION: "{{ versions.TFLINT_VERSION }}"
+            ANSIBLE_LINT_VERSION: "{{ versions.ANSIBLE_LINT_VERSION }}"
+            ALPINE_VERSION: "{{ versions.ALPINE_VERSION }}"
             REPO_URL: "https://github.com/{{ github_user }}/{{ image_name }}"
         source: build
         force_source: yes
@@ -93,4 +64,4 @@
         source: local
       loop:
         - "latest"
-        - "{{ tf_ver }}-ansible-{{ ans_ver }}"
+        - "{{ tag_cmd.stdout }}"
