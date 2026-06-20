@@ -1,32 +1,70 @@
 # ==========================================
-# Stage 1: Builder (For govc Download)
+# Global build args (available to FROM lines below).
+# All versions are *required* and supplied by the Makefile / Ansible playbook,
+# which discover the latest upstream releases. Pinning them here makes a given
+# build fully reproducible: same args in -> same image out.
 # ==========================================
-FROM alpine:latest AS builder
+ARG ALPINE_VERSION=3.22
+ARG TERRAFORM_VERSION
+ARG PACKER_VERSION
 
-RUN apk add --no-cache curl tar
+# ==========================================
+# Pinned upstream tool images (versioned tags, not :latest)
+# ==========================================
+FROM hashicorp/terraform:${TERRAFORM_VERSION} AS terraform
+FROM hashicorp/packer:${PACKER_VERSION} AS packer
 
-# Download the appropriate govc version based on build architecture
+# ==========================================
+# Stage 1: Builder (downloads govc + tflint at pinned versions)
+# ==========================================
+FROM alpine:${ALPINE_VERSION} AS builder
+
+# Fail pipelines if any stage errors (e.g. a failed curl piped into tar).
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+
+RUN apk add --no-cache curl tar unzip
+
+# Download the pinned govc version for the build architecture.
 # (Supports x86_64 for Intel/AMD and aarch64 for Apple Silicon)
+# GOVC_VERSION includes the leading "v" (e.g. v0.54.1), matching the release tag.
+ARG GOVC_VERSION
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then GOVC_ARCH="x86_64"; \
     elif [ "$ARCH" = "aarch64" ]; then GOVC_ARCH="arm64"; \
     else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
-    curl -L "https://github.com/vmware/govmomi/releases/latest/download/govc_Linux_${GOVC_ARCH}.tar.gz" | tar -xz -C /tmp && \
+    curl -fL "https://github.com/vmware/govmomi/releases/download/${GOVC_VERSION}/govc_Linux_${GOVC_ARCH}.tar.gz" | tar -xz -C /tmp && \
     mv /tmp/govc /usr/local/bin/govc && \
     chmod +x /usr/local/bin/govc
+
+# Download the pinned tflint version (TFLINT_VERSION has no leading "v").
+ARG TFLINT_VERSION
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then TFLINT_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then TFLINT_ARCH="arm64"; \
+    else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
+    curl -fL "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${TFLINT_ARCH}.zip" -o /tmp/tflint.zip && \
+    unzip /tmp/tflint.zip -d /usr/local/bin && \
+    chmod +x /usr/local/bin/tflint && \
+    rm /tmp/tflint.zip
 
 # ==========================================
 # Stage 2: Final Minimal Image
 # ==========================================
-FROM alpine:latest
+FROM alpine:${ALPINE_VERSION}
 
-# Define Build Arguments (passed from Makefile/Ansible)
+# Re-declare build args needed in this stage (ARGs do not cross stages).
+ARG ALPINE_VERSION
 ARG TERRAFORM_VERSION
 ARG PACKER_VERSION
 ARG ANSIBLE_VERSION
 ARG PYTHON_VERSION
 ARG GOVC_VERSION
+ARG TFLINT_VERSION
+ARG ANSIBLE_LINT_VERSION
 ARG REPO_URL="https://github.com/furati/IaC-Multi-Toolbox.git"
+
+# Fail pipelines if any stage in a piped RUN errors.
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 
 # OCI Standard Labels for GitHub Integration
 LABEL org.opencontainers.image.title="IaC Multi-Toolbox" \
@@ -41,12 +79,20 @@ LABEL org.opencontainers.image.title="IaC Multi-Toolbox" \
     tool.ansible.version=${ANSIBLE_VERSION} \
     tool.python.version=${PYTHON_VERSION} \
     tool.govc.version=${GOVC_VERSION} \
+    tool.tflint.version=${TFLINT_VERSION} \
+    tool.ansible-lint.version=${ANSIBLE_LINT_VERSION} \
+    tool.alpine.version=${ALPINE_VERSION} \
     # Author/Vendor information
     org.opencontainers.image.vendor="Ralf Buhlrich <ralf@buhlrich.com>"
 
 # 1. Install System Tools and Python Libraries for Ansible
-RUN apk add --no-cache \
+# `apk upgrade` first pulls security fixes for base-image packages (e.g. openssl)
+# that `apk add` alone would not refresh.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache \
     ansible-core \
+    ansible-lint \
+    yamllint \
     openssh-client \
     git \
     ca-certificates \
@@ -62,6 +108,15 @@ RUN apk add --no-cache \
     find /usr/lib/python* -name __pycache__ -exec rm -rf {} + && \
     rm -rf /root/.cache /tmp/*
 
+# 1b. Assert the apk-provided ansible-core matches the discovered/label version.
+# Pinning ALPINE_VERSION makes this deterministic; this guards against label drift.
+RUN INSTALLED=$(ansible --version | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+') && \
+    if [ -n "${ANSIBLE_VERSION}" ] && [ "$INSTALLED" != "${ANSIBLE_VERSION}" ]; then \
+        echo "ERROR: ansible-core ${INSTALLED} installed but label claims ${ANSIBLE_VERSION}." >&2; \
+        echo "Re-run discovery (make build) so the version arg matches alpine:${ALPINE_VERSION}." >&2; \
+        exit 1; \
+    fi
+
 # 2. Install Ansible collection to a global, readable path
 RUN mkdir -p /usr/share/ansible/collections && \
     ansible-galaxy collection install community.docker -p /usr/share/ansible/collections && \
@@ -70,10 +125,11 @@ RUN mkdir -p /usr/share/ansible/collections && \
 # 3. Ensure Ansible knows where to look
 ENV ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections
 
-# 4. Copy binaries from official sources and builder stage
-COPY --from=hashicorp/terraform:latest /bin/terraform /usr/local/bin/terraform
-COPY --from=hashicorp/packer:latest /bin/packer /usr/local/bin/packer
+# 4. Copy binaries from the pinned tool stages and the builder stage
+COPY --from=terraform /bin/terraform /usr/local/bin/terraform
+COPY --from=packer /bin/packer /usr/local/bin/packer
 COPY --from=builder /usr/local/bin/govc /usr/local/bin/govc
+COPY --from=builder /usr/local/bin/tflint /usr/local/bin/tflint
 
 # 5. Set the primary working directory
 WORKDIR /workbench

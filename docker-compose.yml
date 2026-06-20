@@ -1,13 +1,20 @@
+---
 services:
   toolbox:
     build:
       context: .
+      # Versions default to latest so `docker compose build` works standalone.
+      # For pinned/reproducible builds use `make build`, which discovers and
+      # passes the exact versions (and enforces the ansible-core assertion).
       args:
-        TERRAFORM_VERSION: ${TF_VER}
-        PACKER_VERSION: ${PK_VER}
-        ANSIBLE_VERSION: ${ANS_VER}
-        PYTHON_VERSION: ${PY_VER}
-        GOVC_VERSION: ${GV_VER}
+        ALPINE_VERSION: ${ALPINE_VER:-3.22}
+        TERRAFORM_VERSION: ${TF_VER:-latest}
+        PACKER_VERSION: ${PK_VER:-latest}
+        ANSIBLE_VERSION: ${ANS_VER:-}
+        PYTHON_VERSION: ${PY_VER:-}
+        GOVC_VERSION: ${GV_VER:?set GV_VER, e.g. v0.54.1}
+        TFLINT_VERSION: ${TFL_VER:?set TFL_VER, e.g. 0.63.1}
+        ANSIBLE_LINT_VERSION: ${AL_VER:-}
     image: iac-toolbox:latest
     container_name: iac-toolbox
     volumes:

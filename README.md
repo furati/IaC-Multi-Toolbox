@@ -24,6 +24,9 @@ A high-performance, minimalist containerized environment for **Infrastructure as
 | **Ansible** | Configuration Management & App Deployment |
 | **govc** | vSphere/ESXi CLI Management |
 | **Docker CLI** | Container Lifecycle Management |
+| **ansible-lint** | Ansible playbook/role best-practice linting |
+| **yamllint** | YAML style & syntax linting |
+| **tflint** | Terraform linting (errors, deprecations, provider rules) |
 
 -----
 
@@ -73,17 +76,64 @@ Simply run `make` to see all available options:
 ```text
 build           Build the Docker image locally with latest upstream versions
 run             Start an interactive shell session in the toolbox
+lint            Run ansible-lint, yamllint and tflint against /workbench
+scan            Security scan: hadolint (Dockerfile) + trivy (image CVEs)
 push            Execute the Ansible build-and-push workflow to GHCR
 clean           Remove local images and prune build cache
 ```
 
-### Automated Deployment
+### Linting & Security Scanning
 
-The `push` target utilizes an internal Ansible playbook to:
+```bash
+# Lint mounted IaC code (Ansible + YAML + Terraform)
+make lint
 
-1. Validate tool versions.
-2. Tag the image with semantic versioning (e.g., `1.14.8-ansible-2.20.0`).
-3. Authenticate and push to **GitHub Container Registry (GHCR)**.
+# Or call a linter directly inside the toolbox
+iac ansible-lint site.yml
+iac yamllint .
+iac tflint
+
+# Scan the Dockerfile and built image for issues (uses hadolint + trivy)
+make scan
+```
+
+> `make lint` and `make scan` also run automatically in the CI pipeline before any image is pushed to GHCR.
+
+### Local Deployment
+
+The `make push` target runs an internal Ansible playbook ([build-and-push.yml](build-and-push.yml))
+to build and push from your workstation. For day-to-day publishing you normally
+rely on CI (below) — this is the manual fallback.
+
+-----
+
+## 🤖 CI/CD & Auto-Updates
+
+All version discovery lives in one place — [scripts/discover-versions.sh](scripts/discover-versions.sh) —
+which is shared by the `Makefile` and the GitHub workflows so they can never drift.
+
+| Workflow | Trigger | What it does |
+| :--- | :--- | :--- |
+| [build.yml](.github/workflows/build.yml) | reusable (`workflow_call`) | hadolint → build amd64 → trivy CVE scan → lint → smoke + functional tests → (optionally) build & push **multi-arch** (amd64 + arm64) |
+| [ci.yml](.github/workflows/ci.yml) | push / PR to `main`, manual | Calls `build.yml`. PRs build + test only; pushes to `main` also publish. |
+| [auto-update.yml](.github/workflows/auto-update.yml) | **daily** cron, manual | Discovers the latest upstream versions, computes a version tag, and **publishes a fresh image only if that tag isn't already in GHCR**. |
+
+### How auto-update works
+
+The image tag encodes every bundled tool version, e.g.:
+
+```text
+tf1.15.6_pk1.15.4_ans2.18.6_govc0.54.1_tflint0.63.1_al24.12.2_alpine3.22
+```
+
+The daily job recomputes this tag from the newest upstream releases and checks
+GHCR. If the tag already exists, nothing happens; if any tool has a new release,
+the tag changes, the build runs through the full test suite, and the new image is
+published to `:latest` and the version tag. The **registry is the only state** —
+there is no lockfile to maintain.
+
+Every published image is built for **linux/amd64 + linux/arm64** and ships with
+SBOM and provenance attestations.
 
 -----
 

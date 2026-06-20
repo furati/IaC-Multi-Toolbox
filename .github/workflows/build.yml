@@ -1,0 +1,153 @@
+---
+# Reusable: build -> test -> (optionally) publish the IaC toolbox.
+# Called by ci.yml (on push/PR) and auto-update.yml (on a schedule).
+name: build
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: "Build multi-arch and push to GHCR after tests pass"
+        type: boolean
+        default: false
+    outputs:
+      version_tag:
+        description: "The computed version tag for the built image"
+        value: ${{ jobs.build.outputs.version_tag }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/iac-toolbox
+    outputs:
+      version_tag: ${{ steps.meta.outputs.version_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Discover tool versions
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./scripts/discover-versions.sh all >> "$GITHUB_ENV"
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          # Encodes every tool version, so the tag changes when ANY tool changes.
+          TAG="$(./scripts/discover-versions.sh tag)"
+          echo "version_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed tag: ${TAG}"
+
+      - name: Assemble build args
+        run: |
+          {
+            echo 'BUILD_ARGS<<EOF'
+            echo "ALPINE_VERSION=${ALPINE_VERSION}"
+            echo "TERRAFORM_VERSION=${TERRAFORM_VERSION}"
+            echo "PACKER_VERSION=${PACKER_VERSION}"
+            echo "ANSIBLE_VERSION=${ANSIBLE_VERSION}"
+            echo "PYTHON_VERSION=${PYTHON_VERSION}"
+            echo "GOVC_VERSION=${GOVC_VERSION}"
+            echo "TFLINT_VERSION=${TFLINT_VERSION}"
+            echo "ANSIBLE_LINT_VERSION=${ANSIBLE_LINT_VERSION}"
+            echo "REPO_URL=https://github.com/${{ github.repository }}"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # --- Build a single-arch image locally for testing -------------------
+      # Multi-arch manifests cannot be --loaded into the runner's daemon, so we
+      # build amd64 here, test it, then build+push all platforms (cache reused).
+      - name: Build amd64 image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: iac-toolbox:test
+          build-args: ${{ env.BUILD_ARGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Report HIGH + CRITICAL for visibility. This does NOT fail the build:
+      # the bundled upstream binaries (terraform/packer/govc/tflint) regularly
+      # carry HIGH Go-stdlib CVEs we cannot patch, which would otherwise block
+      # every daily auto-update.
+      - name: CVE report (trivy, non-blocking)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: iac-toolbox:test
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      # Gate the build on fixable CRITICAL vulnerabilities only.
+      - name: CVE gate (trivy, fail on fixable CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: iac-toolbox:test
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Lint repo with bundled linters
+        run: |
+          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test yamllint .
+          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test ansible-lint
+
+      - name: Smoke tests (tool versions)
+        run: |
+          docker run --rm iac-toolbox:test terraform version | grep -q "v${TERRAFORM_VERSION}"
+          docker run --rm iac-toolbox:test packer version | grep -q "${PACKER_VERSION}"
+          docker run --rm iac-toolbox:test ansible --version | grep -q "${ANSIBLE_VERSION}"
+          docker run --rm iac-toolbox:test govc version | grep -q "${GOVC_VERSION#v}"
+          docker run --rm iac-toolbox:test tflint --version | grep -q "${TFLINT_VERSION}"
+          echo "All smoke tests passed."
+
+      - name: Functional tests
+        run: |
+          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test sh -c \
+            'echo "provider \"local\" {}" > _t.tf && terraform init && rm -rf .terraform* _t.tf'
+          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test \
+            ansible-playbook build-and-push.yml --syntax-check
+          echo "All functional tests passed."
+
+      # --- Publish (multi-arch) -------------------------------------------
+      - name: Log in to GHCR
+        if: ${{ inputs.publish }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build & push multi-arch image
+        if: ${{ inputs.publish }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          provenance: true
+          sbom: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.version_tag }}
+          build-args: ${{ env.BUILD_ARGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

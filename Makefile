@@ -1,17 +1,28 @@
 # ==========================================
-# Dynamic Tool Version Discovery
+# Core Identifiers (defined first so version discovery can reference them)
 # ==========================================
-TF_VER  := $(shell docker run --rm hashicorp/terraform:latest version -json | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-PK_VER  := $(shell docker run --rm hashicorp/packer:latest version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-ANS_VER := $(shell docker run --rm alpine:latest sh -c "apk add --no-cache ansible > /dev/null && ansible --version" | head -n 1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
-PY_VER  := $(shell docker run --rm alpine:latest sh -c "apk add --no-cache python3 > /dev/null && python3 --version" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
-GV_VER  := $(shell docker run --rm $(IMAGE_NAME) govc version | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
+IMAGE_NAME := iac-toolbox
+TOKEN_FILE := .github_token
+DISCOVER   := ./scripts/discover-versions.sh
+
+# ==========================================
+# Dynamic Tool Version Discovery (single source of truth: scripts/)
+# Terraform/Packer/govc/tflint track latest upstream; apk tools track the
+# pinned Alpine release. Discovered versions are passed as build args and
+# pinned inside the image, so a given build is fully reproducible.
+# ==========================================
+ALPINE_VER := $(shell $(DISCOVER) alpine)
+TF_VER     := $(shell $(DISCOVER) terraform)
+PK_VER     := $(shell $(DISCOVER) packer)
+ANS_VER    := $(shell $(DISCOVER) ansible)
+PY_VER     := $(shell $(DISCOVER) python)
+GV_VER     := $(shell $(DISCOVER) govc)
+AL_VER     := $(shell $(DISCOVER) ansible-lint)
+TFL_VER    := $(shell $(DISCOVER) tflint)
 
 # Exporting Host IDs for Permission Mapping
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
-IMAGE_NAME := iac-toolbox
-TOKEN_FILE := .github_token
 
 # 1. Robust TTY Detection
 # We check if we are in a terminal AND not in a CI environment (GitHub Actions)
@@ -27,7 +38,7 @@ DOCKER_BASE := docker run --rm \
     -e HOST_GID=$(HOST_GID) \
     $(IMAGE_NAME)
 
-.PHONY: help build run push clean
+.PHONY: help build run push clean lint scan test test-functional
 
 help: ## Display this help information
 	@echo "-----------------------------------------------------------------------"
@@ -37,6 +48,7 @@ help: ## Display this help information
 	@echo "-----------------------------------------------------------------------"
 	@echo "Current Versions (Dynamically Discovered):"
 	@echo "Terraform: $(TF_VER) | Packer: $(PK_VER) | Ansible: $(ANS_VER)"
+	@echo "Linters -> ansible-lint: $(AL_VER) | tflint: $(TFL_VER)"
 
 build: ## Build the Docker image locally with upstream tool versions
 	@echo "--- Starting Build Process ---"
@@ -45,7 +57,10 @@ build: ## Build the Docker image locally with upstream tool versions
 		--build-arg PACKER_VERSION=$(PK_VER) \
 		--build-arg ANSIBLE_VERSION=$(ANS_VER) \
 		--build-arg PYTHON_VERSION=$(PY_VER) \
-		--build-arg GOVC_VERSION=$(GV_VER) .
+		--build-arg GOVC_VERSION=$(GV_VER) \
+		--build-arg TFLINT_VERSION=$(TFL_VER) \
+		--build-arg ANSIBLE_LINT_VERSION=$(AL_VER) \
+		--build-arg ALPINE_VERSION=$(ALPINE_VER) .
 
 run: ## Launch an interactive shell session within the toolbox
 	$(DOCKER_BASE) $(INTERACTIVE) /bin/sh
@@ -90,3 +105,24 @@ test-functional: ## Test actual tool functionality (Init, Syntax, etc.)
 	@echo "Testing Packer syntax..."
 	@$(DOCKER_BASE) packer --version
 	@echo "✅ All functional tests passed!"
+
+lint: ## Run ansible-lint, yamllint and tflint against /workbench
+	@echo "--- Running Linters ---"
+	@echo "yamllint (YAML style)..."
+	@$(DOCKER_BASE) yamllint .
+	@echo "ansible-lint (playbook best practices)..."
+	@$(DOCKER_BASE) ansible-lint
+	@echo "tflint (Terraform)... (skipped when no .tf files present)"
+	@$(DOCKER_BASE) sh -c 'if ls *.tf >/dev/null 2>&1; then tflint --init && tflint; else echo "  no .tf files, skipping"; fi'
+	@echo "✅ Linting complete!"
+
+scan: ## Security scan: hadolint (Dockerfile) + trivy (image CVEs)
+	@echo "--- Dockerfile Lint (hadolint) ---"
+	docker run --rm -v $(shell pwd):/repo -w /repo hadolint/hadolint hadolint Dockerfile
+	@echo "--- CVE Report (trivy, HIGH+CRITICAL, non-blocking) ---"
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+		aquasec/trivy:latest image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 $(IMAGE_NAME)
+	@echo "--- CVE Gate (trivy, fail on fixable CRITICAL) ---"
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+		aquasec/trivy:latest image --severity CRITICAL --ignore-unfixed --exit-code 1 $(IMAGE_NAME)
+	@echo "✅ Security scan passed!"

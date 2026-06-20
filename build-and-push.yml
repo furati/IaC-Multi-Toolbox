@@ -5,7 +5,8 @@
   vars:
     image_name: "iac-toolbox"
     github_user: "furati"
-    govc_version: "v0.35.0"
+    # Pinned Alpine release (keep in sync with the Makefile's ALPINE_VER).
+    alpine_version: "3.22"
 
   tasks:
     - name: "Dynamic Version Discovery: Terraform"
@@ -18,16 +19,42 @@
       register: pk_ver_cmd
       changed_when: false
 
-    - name: "Dynamic Version Discovery: Ansible & Python (via Alpine)"
-      shell: 'docker run --rm alpine:latest sh -c "apk add --no-cache ansible > /dev/null && ansible --version" | head -n 1 | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+"'
+    - name: "Dynamic Version Discovery: ansible-core (via pinned Alpine)"
+      shell: 'docker run --rm alpine:{{ alpine_version }} sh -c "apk add --no-cache ansible-core > /dev/null && ansible --version" | head -n 1 | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+"'
       register: ans_ver_cmd
       changed_when: false
+
+    - name: "Dynamic Version Discovery: Python (via pinned Alpine)"
+      shell: 'docker run --rm alpine:{{ alpine_version }} sh -c "apk add --no-cache python3 > /dev/null && python3 --version" | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+"'
+      register: py_ver_cmd
+      changed_when: false
+
+    - name: "Dynamic Version Discovery: ansible-lint (via pinned Alpine)"
+      shell: 'docker run --rm alpine:{{ alpine_version }} sh -c "apk add --no-cache ansible-lint > /dev/null && ansible-lint --version" | head -n 1 | grep -oE "[0-9]+\\.[0-9]+\\.[0-9]+" | head -1'
+      register: al_ver_cmd
+      changed_when: false
+
+    - name: "Dynamic Version Discovery: tflint (GitHub latest release)"
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/terraform-linters/tflint/releases/latest
+        return_content: true
+      register: tflint_release
+
+    - name: "Dynamic Version Discovery: govc (GitHub latest release)"
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/vmware/govmomi/releases/latest
+        return_content: true
+      register: govc_release
 
     - name: "Set Version Facts"
       set_fact:
         tf_ver: "{{ tf_ver_cmd.stdout }}"
         pk_ver: "{{ pk_ver_cmd.stdout }}"
         ans_ver: "{{ ans_ver_cmd.stdout }}"
+        py_ver: "{{ py_ver_cmd.stdout }}"
+        al_ver: "{{ al_ver_cmd.stdout }}"
+        tflint_ver: "{{ tflint_release.json.tag_name | regex_replace('^v', '') }}"
+        govc_version: "{{ govc_release.json.tag_name }}"
 
     - name: "Build Docker Image with OCI Labels"
       community.docker.docker_image:
@@ -38,7 +65,11 @@
             TERRAFORM_VERSION: "{{ tf_ver }}"
             PACKER_VERSION: "{{ pk_ver }}"
             ANSIBLE_VERSION: "{{ ans_ver }}"
+            PYTHON_VERSION: "{{ py_ver }}"
             GOVC_VERSION: "{{ govc_version }}"
+            TFLINT_VERSION: "{{ tflint_ver }}"
+            ANSIBLE_LINT_VERSION: "{{ al_ver }}"
+            ALPINE_VERSION: "{{ alpine_version }}"
             REPO_URL: "https://github.com/{{ github_user }}/{{ image_name }}"
         source: build
         force_source: yes
