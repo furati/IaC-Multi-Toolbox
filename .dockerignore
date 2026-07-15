@@ -3,11 +3,13 @@
 .github
 .gitignore
 .dockerignore
+.devcontainer
 README.md
 LICENSE
 Makefile
 docker-compose.yml
 build-and-push.yml
+dind/
 
 # Secrets / credentials (defense in depth — also in .gitignore)
 .github_token

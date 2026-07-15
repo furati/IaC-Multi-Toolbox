@@ -33,14 +33,13 @@
         build:
           path: .
           args:
+            DEBIAN_VERSION: "{{ versions.DEBIAN_VERSION }}"
             TERRAFORM_VERSION: "{{ versions.TERRAFORM_VERSION }}"
             PACKER_VERSION: "{{ versions.PACKER_VERSION }}"
             ANSIBLE_VERSION: "{{ versions.ANSIBLE_VERSION }}"
-            PYTHON_VERSION: "{{ versions.PYTHON_VERSION }}"
             GOVC_VERSION: "{{ versions.GOVC_VERSION }}"
             TFLINT_VERSION: "{{ versions.TFLINT_VERSION }}"
             ANSIBLE_LINT_VERSION: "{{ versions.ANSIBLE_LINT_VERSION }}"
-            ALPINE_VERSION: "{{ versions.ALPINE_VERSION }}"
             REPO_URL: "https://github.com/{{ github_user }}/{{ image_name }}"
         source: build
         force_source: yes

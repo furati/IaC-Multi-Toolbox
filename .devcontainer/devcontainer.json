@@ -1,0 +1,31 @@
+{
+    // Reference devcontainer for daily IaC work. Copy this file into any
+    // project (.devcontainer/devcontainer.json) to get the full toolbox:
+    // Terraform, Packer, Ansible (+molecule, vmware/nutanix collections),
+    // govc, tflint, xorriso and the docker CLI on Debian 13.
+    "name": "IaC Toolbox",
+    "image": "ghcr.io/furati/iac-toolbox:latest",
+
+    // The image ships a non-root 'dev' user (UID/GID 1000, passwordless sudo).
+    // On Linux hosts VS Code rewrites its UID/GID to match the host user.
+    "remoteUser": "dev",
+    "updateRemoteUserUID": true,
+
+    // Docker-out-of-Docker: the host socket lets `docker` (and molecule's
+    // docker driver) manage host containers from inside the devcontainer.
+    "mounts": [
+        "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    ],
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "redhat.ansible",
+                "hashicorp.terraform",
+                "hashicorp.hcl",
+                "ms-azuretools.vscode-docker",
+                "redhat.vscode-yaml"
+            ]
+        }
+    }
+}

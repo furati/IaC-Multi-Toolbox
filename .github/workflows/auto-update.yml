@@ -19,6 +19,7 @@ jobs:
     outputs:
       changed: ${{ steps.decide.outputs.changed }}
       version_tag: ${{ steps.decide.outputs.version_tag }}
+      dind_tag: ${{ steps.decide.outputs.dind_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -38,18 +39,28 @@ jobs:
       - name: Decide whether a new image is needed
         id: decide
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/iac-toolbox
+          TOOLBOX_IMAGE: ghcr.io/${{ github.repository_owner }}/iac-toolbox
+          DIND_IMAGE: ghcr.io/${{ github.repository_owner }}/dind
         run: |
           TAG="$(./scripts/discover-versions.sh tag)"
+          DOCKER_VERSION="$(./scripts/discover-versions.sh docker)"
+          DIND_TAG="$(DOCKER_VERSION="$DOCKER_VERSION" ./scripts/discover-versions.sh dind-tag)"
           echo "version_tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Latest versions resolve to tag: ${TAG}"
-          if docker manifest inspect "${IMAGE}:${TAG}" >/dev/null 2>&1; then
-            echo "Image ${IMAGE}:${TAG} already published — nothing to do."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New tool versions detected — a build is required."
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "dind_tag=${DIND_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Latest versions resolve to tags: ${TAG} / ${DIND_TAG}"
+          CHANGED=false
+          if ! docker manifest inspect "${TOOLBOX_IMAGE}:${TAG}" >/dev/null 2>&1; then
+            echo "Toolbox ${TOOLBOX_IMAGE}:${TAG} not published yet — build required."
+            CHANGED=true
           fi
+          if ! docker manifest inspect "${DIND_IMAGE}:${DIND_TAG}" >/dev/null 2>&1; then
+            echo "dind ${DIND_IMAGE}:${DIND_TAG} not published yet — build required."
+            CHANGED=true
+          fi
+          if [ "$CHANGED" = "false" ]; then
+            echo "Both images already published — nothing to do."
+          fi
+          echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
 
   publish:
     needs: check
@@ -68,6 +79,7 @@ jobs:
         run: |
           {
             echo "### Auto-update result"
-            echo "Tag: \`${{ needs.check.outputs.version_tag }}\`"
+            echo "Toolbox tag: \`${{ needs.check.outputs.version_tag }}\`"
+            echo "dind tag: \`${{ needs.check.outputs.dind_tag }}\`"
             echo "Publish outcome: ${{ needs.publish.result }}"
           } >> "$GITHUB_STEP_SUMMARY"

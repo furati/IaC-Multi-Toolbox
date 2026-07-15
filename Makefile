@@ -1,24 +1,27 @@
 # ==========================================
 # Core Identifiers (defined first so version discovery can reference them)
 # ==========================================
-IMAGE_NAME := iac-toolbox
-TOKEN_FILE := .github_token
-DISCOVER   := ./scripts/discover-versions.sh
+IMAGE_NAME      := iac-toolbox
+DIND_IMAGE_NAME := dind
+TOKEN_FILE      := .github_token
+DISCOVER        := ./scripts/discover-versions.sh
 
 # ==========================================
 # Dynamic Tool Version Discovery (single source of truth: scripts/)
-# Terraform/Packer/govc/tflint track latest upstream; apk tools track the
-# pinned Alpine release. Discovered versions are passed as build args and
-# pinned inside the image, so a given build is fully reproducible.
+# Terraform/Packer/govc/tflint track latest upstream, ansible-core and
+# ansible-lint track PyPI, the dind engine tracks the pinned Debian release.
+# Discovered versions are passed as build args and pinned inside the image,
+# so a given build is fully reproducible.
 # ==========================================
-ALPINE_VER := $(shell $(DISCOVER) alpine)
+DEBIAN_VER := $(shell $(DISCOVER) debian)
 TF_VER     := $(shell $(DISCOVER) terraform)
 PK_VER     := $(shell $(DISCOVER) packer)
 ANS_VER    := $(shell $(DISCOVER) ansible)
-PY_VER     := $(shell $(DISCOVER) python)
 GV_VER     := $(shell $(DISCOVER) govc)
 AL_VER     := $(shell $(DISCOVER) ansible-lint)
 TFL_VER    := $(shell $(DISCOVER) tflint)
+# Lazily evaluated (spins up a container) — only used by the dind targets.
+DOCKER_VER  = $(shell $(DISCOVER) docker)
 
 # Exporting Host IDs for Permission Mapping
 export HOST_UID := $(shell id -u)
@@ -38,7 +41,7 @@ DOCKER_BASE := docker run --rm \
     -e HOST_GID=$(HOST_GID) \
     $(IMAGE_NAME)
 
-.PHONY: help build run push clean lint scan test test-functional
+.PHONY: help build build-dind run push clean lint scan scan-dind test test-dind test-functional
 
 help: ## Display this help information
 	@echo "-----------------------------------------------------------------------"
@@ -47,23 +50,28 @@ help: ## Display this help information
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 	@echo "-----------------------------------------------------------------------"
 	@echo "Current Versions (Dynamically Discovered):"
-	@echo "Terraform: $(TF_VER) | Packer: $(PK_VER) | Ansible: $(ANS_VER)"
+	@echo "Terraform: $(TF_VER) | Packer: $(PK_VER) | ansible-core: $(ANS_VER)"
 	@echo "Linters -> ansible-lint: $(AL_VER) | tflint: $(TFL_VER)"
 
-build: ## Build the Docker image locally with upstream tool versions
+build: ## Build the toolbox image locally with upstream tool versions
 	@echo "--- Starting Build Process ---"
 	docker build -t $(IMAGE_NAME) \
+		--build-arg DEBIAN_VERSION=$(DEBIAN_VER) \
 		--build-arg TERRAFORM_VERSION=$(TF_VER) \
 		--build-arg PACKER_VERSION=$(PK_VER) \
 		--build-arg ANSIBLE_VERSION=$(ANS_VER) \
-		--build-arg PYTHON_VERSION=$(PY_VER) \
 		--build-arg GOVC_VERSION=$(GV_VER) \
 		--build-arg TFLINT_VERSION=$(TFL_VER) \
-		--build-arg ANSIBLE_LINT_VERSION=$(AL_VER) \
-		--build-arg ALPINE_VERSION=$(ALPINE_VER) .
+		--build-arg ANSIBLE_LINT_VERSION=$(AL_VER) .
+
+build-dind: ## Build the dind (Docker-in-Docker) image locally
+	@echo "--- Building dind (docker.io $(DOCKER_VER), Debian $(DEBIAN_VER)) ---"
+	docker build -t $(DIND_IMAGE_NAME) \
+		--build-arg DEBIAN_VERSION=$(DEBIAN_VER) \
+		--build-arg DOCKER_VERSION=$(DOCKER_VER) dind
 
 run: ## Launch an interactive shell session within the toolbox
-	$(DOCKER_BASE) $(INTERACTIVE) /bin/sh
+	$(DOCKER_BASE) $(INTERACTIVE) /bin/bash
 
 push: ## Execute the Ansible workflow (Tagging & GHCR Push)
 	@if [ -n "$(GITHUB_TOKEN)" ]; then \
@@ -81,8 +89,9 @@ push: ## Execute the Ansible workflow (Tagging & GHCR Push)
 	echo "--- Starting Push Workflow ---"; \
 	$(DOCKER_BASE) ansible-playbook build-and-push.yml -e "gh_token=$$TOKEN"
 
-clean: ## Remove local image and prune dangling Docker layers
+clean: ## Remove local images and prune dangling Docker layers
 	docker rmi $(IMAGE_NAME) 2>/dev/null || true
+	docker rmi $(DIND_IMAGE_NAME) 2>/dev/null || true
 
 test: ## Verify tool installations and versions within the container
 	@echo "--- Starting Container Smoke Tests ---"
@@ -90,11 +99,28 @@ test: ## Verify tool installations and versions within the container
 	@$(DOCKER_BASE) terraform version | grep -q "v$(TF_VER)" && echo "  OK"
 	@echo "Testing Packer: $(PK_VER)..."
 	@$(DOCKER_BASE) packer version | grep -q "$(PK_VER)" && echo "  OK"
-	@echo "Testing Ansible: $(ANS_VER)..."
+	@echo "Testing ansible-core: $(ANS_VER)..."
 	@$(DOCKER_BASE) ansible --version | grep -q "$(ANS_VER)" && echo "  OK"
 	@echo "Testing govc: $(GV_VER)..."
-	@$(DOCKER_BASE) govc version | grep -q "$(GV_VER)" && echo "  OK"
+	@$(DOCKER_BASE) govc version | grep -q "$(GV_VER:v%=%)" && echo "  OK"
+	@echo "Testing molecule..."
+	@$(DOCKER_BASE) molecule --version >/dev/null && echo "  OK"
+	@echo "Testing docker CLI + xorriso..."
+	@$(DOCKER_BASE) sh -c 'docker --version && xorriso -version' >/dev/null && echo "  OK"
 	@echo "✅ All smoke tests passed!"
+
+test-dind: ## Verify the dind image starts a working Docker daemon
+	@echo "--- Starting dind Smoke Test ---"
+	@docker run --rm --entrypoint dockerd $(DIND_IMAGE_NAME) --version
+	@docker rm -f dind-smoke 2>/dev/null || true
+	@docker run -d --privileged --name dind-smoke $(DIND_IMAGE_NAME)
+	@ok=0; for i in $$(seq 1 30); do \
+		docker exec dind-smoke docker info >/dev/null 2>&1 && { ok=1; break; }; sleep 1; done; \
+	if [ $$ok -eq 1 ]; then \
+		echo "✅ dind daemon is up!"; docker rm -f dind-smoke >/dev/null; \
+	else \
+		docker logs dind-smoke; docker rm -f dind-smoke >/dev/null; exit 1; \
+	fi
 
 test-functional: ## Test actual tool functionality (Init, Syntax, etc.)
 	@echo "--- Starting Functional Tests ---"
@@ -116,7 +142,7 @@ lint: ## Run ansible-lint, yamllint and tflint against /workbench
 	@$(DOCKER_BASE) sh -c 'if ls *.tf >/dev/null 2>&1; then tflint --init && tflint; else echo "  no .tf files, skipping"; fi'
 	@echo "✅ Linting complete!"
 
-scan: ## Security scan: hadolint (Dockerfile) + trivy (image CVEs)
+scan: ## Security scan: hadolint (Dockerfile) + trivy (toolbox image CVEs)
 	@echo "--- Dockerfile Lint (hadolint) ---"
 	docker run --rm -v $(shell pwd):/repo -w /repo hadolint/hadolint hadolint Dockerfile
 	@echo "--- CVE Report (trivy, HIGH+CRITICAL, non-blocking) ---"
@@ -125,4 +151,12 @@ scan: ## Security scan: hadolint (Dockerfile) + trivy (image CVEs)
 	@echo "--- CVE Gate (trivy, fail on fixable CRITICAL) ---"
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 		aquasec/trivy:latest image --severity CRITICAL --ignore-unfixed --exit-code 1 $(IMAGE_NAME)
+	@echo "✅ Security scan passed!"
+
+scan-dind: ## Security scan: hadolint + trivy for the dind image
+	@echo "--- Dockerfile Lint (hadolint) ---"
+	docker run --rm -v $(shell pwd):/repo -w /repo hadolint/hadolint hadolint dind/Dockerfile
+	@echo "--- CVE Gate (trivy, fail on fixable CRITICAL) ---"
+	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+		aquasec/trivy:latest image --severity CRITICAL --ignore-unfixed --exit-code 1 $(DIND_IMAGE_NAME)
 	@echo "✅ Security scan passed!"
