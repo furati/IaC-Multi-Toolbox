@@ -127,10 +127,12 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
+      # RUN_AS_ROOT: the runner workspace contains root-owned files from the
+      # trivy steps (.cache/trivy) that the non-root default user cannot stat.
       - name: Lint repo with bundled linters
         run: |
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test yamllint .
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test ansible-lint
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test yamllint .
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test ansible-lint
 
       - name: Smoke tests (tool versions)
         run: |
@@ -146,11 +148,13 @@ jobs:
           docker run --rm iac-toolbox:test sh -c '[ "$(whoami)" = "dev" ] && sudo true'
           echo "All smoke tests passed."
 
+      # RUN_AS_ROOT: terraform init writes into the runner-owned workspace,
+      # which the non-root default user cannot do.
       - name: Functional tests
         run: |
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test sh -c \
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test sh -c \
             'echo "provider \"local\" {}" > _t.tf && terraform init && rm -rf .terraform* _t.tf'
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test \
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test \
             ansible-playbook build-and-push.yml --syntax-check
           echo "All functional tests passed."
 
