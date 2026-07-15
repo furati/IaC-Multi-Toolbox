@@ -5,16 +5,15 @@ services:
       context: .
       # Versions default to latest so `docker compose build` works standalone.
       # For pinned/reproducible builds use `make build`, which discovers and
-      # passes the exact versions (and enforces the ansible-core assertion).
+      # passes the exact versions.
       args:
-        ALPINE_VERSION: ${ALPINE_VER:-3.22}
+        DEBIAN_VERSION: ${DEBIAN_VER:-13}
         TERRAFORM_VERSION: ${TF_VER:-latest}
         PACKER_VERSION: ${PK_VER:-latest}
-        ANSIBLE_VERSION: ${ANS_VER:-}
-        PYTHON_VERSION: ${PY_VER:-}
+        ANSIBLE_VERSION: ${ANS_VER:?set ANS_VER, e.g. 2.19.5}
         GOVC_VERSION: ${GV_VER:?set GV_VER, e.g. v0.54.1}
         TFLINT_VERSION: ${TFL_VER:?set TFL_VER, e.g. 0.63.1}
-        ANSIBLE_LINT_VERSION: ${AL_VER:-}
+        ANSIBLE_LINT_VERSION: ${AL_VER:?set AL_VER, e.g. 25.9.2}
     image: iac-toolbox:latest
     container_name: iac-toolbox
     volumes:
@@ -24,3 +23,18 @@ services:
       - HOST_GID=${GID}
     stdin_open: true
     tty: true
+
+  dind:
+    build:
+      context: dind
+      args:
+        DEBIAN_VERSION: ${DEBIAN_VER:-13}
+    image: dind:latest
+    container_name: dind
+    privileged: true
+    profiles: ["dind"]
+    volumes:
+      - dind-storage:/var/lib/docker
+
+volumes:
+  dind-storage:

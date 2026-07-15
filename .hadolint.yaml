@@ -1,10 +1,13 @@
 ---
 # hadolint configuration.
-# We deliberately do NOT pin apk/pip package versions in the Dockerfile:
-# reproducibility is achieved by pinning the Alpine base image (ALPINE_VERSION),
-# which fixes every apk-provided package version for a given release.
+# We deliberately do NOT pin apt/pip package versions in the Dockerfile:
+# reproducibility is achieved by pinning the Debian base image (DEBIAN_VERSION),
+# which fixes every apt-provided package version for a given release. The two
+# Python tools that drive the image tag (ansible-core, ansible-lint) ARE pinned
+# via build args.
 ignored:
-  - DL3018  # Pin versions in apk add — handled via pinned ALPINE_VERSION
-  - DL3013  # Pin versions in pip — runtime libs for ansible community.docker
+  - DL3008  # Pin versions in apt-get install — handled via pinned DEBIAN_VERSION
+  - DL3013  # Pin versions in pip — supporting libs float, tag drivers are pinned
+  - DL3005  # apt-get upgrade — deliberate, pulls security fixes for base packages
 
 failure-threshold: warning

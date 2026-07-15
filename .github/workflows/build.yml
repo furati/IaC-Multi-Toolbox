@@ -1,6 +1,7 @@
 ---
-# Reusable: build -> test -> (optionally) publish + sign the IaC toolbox.
-# Called by ci.yml (on push/PR) and auto-update.yml (on a schedule).
+# Reusable: build -> test -> (optionally) publish + sign both images
+# (iac-toolbox and dind). Called by ci.yml (on push/PR) and auto-update.yml
+# (on a schedule).
 name: build
 
 on:
@@ -12,8 +13,11 @@ on:
         default: false
     outputs:
       version_tag:
-        description: "The computed version tag for the built image"
-        value: ${{ jobs.build.outputs.version_tag }}
+        description: "The computed version tag for the toolbox image"
+        value: ${{ jobs.toolbox.outputs.version_tag }}
+      dind_tag:
+        description: "The computed version tag for the dind image"
+        value: ${{ jobs.dind.outputs.dind_tag }}
 
 permissions:
   contents: read
@@ -22,7 +26,7 @@ permissions:
   id-token: write          # cosign keyless (OIDC) signing
 
 jobs:
-  build:
+  toolbox:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/iac-toolbox
@@ -54,11 +58,10 @@ jobs:
         run: |
           {
             echo 'BUILD_ARGS<<EOF'
-            echo "ALPINE_VERSION=${ALPINE_VERSION}"
+            echo "DEBIAN_VERSION=${DEBIAN_VERSION}"
             echo "TERRAFORM_VERSION=${TERRAFORM_VERSION}"
             echo "PACKER_VERSION=${PACKER_VERSION}"
             echo "ANSIBLE_VERSION=${ANSIBLE_VERSION}"
-            echo "PYTHON_VERSION=${PYTHON_VERSION}"
             echo "GOVC_VERSION=${GOVC_VERSION}"
             echo "TFLINT_VERSION=${TFLINT_VERSION}"
             echo "ANSIBLE_LINT_VERSION=${ANSIBLE_LINT_VERSION}"
@@ -110,6 +113,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: trivy-results.sarif
+          category: iac-toolbox
         continue-on-error: true
 
       # Gate the build on fixable CRITICAL vulnerabilities only. The bundled
@@ -123,10 +127,12 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
+      # RUN_AS_ROOT: the runner workspace contains root-owned files from the
+      # trivy steps (.cache/trivy) that the non-root default user cannot stat.
       - name: Lint repo with bundled linters
         run: |
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test yamllint .
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test ansible-lint
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test yamllint .
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test ansible-lint
 
       - name: Smoke tests (tool versions)
         run: |
@@ -135,13 +141,20 @@ jobs:
           docker run --rm iac-toolbox:test ansible --version | grep -q "${ANSIBLE_VERSION}"
           docker run --rm iac-toolbox:test govc version | grep -q "${GOVC_VERSION#v}"
           docker run --rm iac-toolbox:test tflint --version | grep -q "${TFLINT_VERSION}"
+          docker run --rm iac-toolbox:test molecule --version >/dev/null
+          docker run --rm iac-toolbox:test sh -c 'docker --version && xorriso -version'
+          docker run --rm iac-toolbox:test ansible-galaxy collection list | grep -q community.vmware
+          # Devcontainer expectations: non-root default user with sudo.
+          docker run --rm iac-toolbox:test sh -c '[ "$(whoami)" = "dev" ] && sudo true'
           echo "All smoke tests passed."
 
+      # RUN_AS_ROOT: terraform init writes into the runner-owned workspace,
+      # which the non-root default user cannot do.
       - name: Functional tests
         run: |
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test sh -c \
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test sh -c \
             'echo "provider \"local\" {}" > _t.tf && terraform init && rm -rf .terraform* _t.tf'
-          docker run --rm -v "$PWD":/workbench -w /workbench iac-toolbox:test \
+          docker run --rm -e RUN_AS_ROOT=1 -v "$PWD":/workbench -w /workbench iac-toolbox:test \
             ansible-playbook build-and-push.yml --syntax-check
           echo "All functional tests passed."
 
@@ -170,6 +183,134 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ steps.meta.outputs.version_tag }}
+          build-args: ${{ env.BUILD_ARGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install cosign
+        if: ${{ inputs.publish }}
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign image (keyless, by digest)
+        if: ${{ inputs.publish }}
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+  dind:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/dind
+    outputs:
+      dind_tag: ${{ steps.meta.outputs.dind_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Lint Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: dind/Dockerfile
+
+      - name: Discover engine version & compute tag
+        id: meta
+        run: |
+          DEBIAN_VERSION="$(./scripts/discover-versions.sh debian)"
+          DOCKER_VERSION="$(./scripts/discover-versions.sh docker)"
+          TAG="$(DOCKER_VERSION="$DOCKER_VERSION" ./scripts/discover-versions.sh dind-tag)"
+          {
+            echo "DEBIAN_VERSION=${DEBIAN_VERSION}"
+            echo "DOCKER_VERSION=${DOCKER_VERSION}"
+          } >> "$GITHUB_ENV"
+          echo "dind_tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Computed tag: ${TAG}"
+
+      - name: Assemble build args
+        run: |
+          {
+            echo 'BUILD_ARGS<<EOF'
+            echo "DEBIAN_VERSION=${DEBIAN_VERSION}"
+            echo "DOCKER_VERSION=${DOCKER_VERSION}"
+            echo "REPO_URL=https://github.com/${{ github.repository }}"
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build amd64 image for testing
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: dind
+          load: true
+          platforms: linux/amd64
+          tags: dind:test
+          build-args: ${{ env.BUILD_ARGS }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: CVE report (trivy, SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: dind:test
+          format: sarif
+          output: trivy-dind.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload SARIF to Security tab
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: trivy-dind.sarif
+          category: dind
+        continue-on-error: true
+
+      - name: CVE gate (trivy, fail on fixable CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: dind:test
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Smoke test (daemon actually starts)
+        run: |
+          docker run --rm --entrypoint dockerd dind:test --version | grep -q "${DOCKER_VERSION}"
+          docker run -d --privileged --name dind-smoke dind:test
+          for i in $(seq 1 30); do
+            docker exec dind-smoke docker info >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec dind-smoke docker info >/dev/null || { docker logs dind-smoke; exit 1; }
+          docker rm -f dind-smoke
+          echo "dind daemon came up cleanly."
+
+      # --- Publish (multi-arch) + sign -------------------------------------
+      - name: Log in to GHCR
+        if: ${{ inputs.publish }}
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build & push multi-arch image
+        id: push
+        if: ${{ inputs.publish }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: dind
+          push: true
+          platforms: linux/amd64,linux/arm64
+          provenance: true
+          sbom: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.dind_tag }}
           build-args: ${{ env.BUILD_ARGS }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
