@@ -159,8 +159,16 @@ RUN apt-get update && \
     bash-completion \
     gosu \
     sudo \
+    locales \
     docker-cli && \
     rm -rf /var/lib/apt/lists/*
+
+# 1b. Generate the locales terminals commonly forward (VS Code/macOS sends
+# en_US.UTF-8 into devcontainer sessions; slim images ship none).
+RUN sed -i -e 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' \
+        -e 's/^# *de_DE.UTF-8 UTF-8/de_DE.UTF-8 UTF-8/' /etc/locale.gen && \
+    locale-gen
+ENV LANG=en_US.UTF-8
 
 # 2. Non-root default user (devcontainer convention: UID/GID 1000) with
 # passwordless sudo for ad-hoc package installs during daily work.
