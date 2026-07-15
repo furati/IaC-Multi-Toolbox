@@ -17,6 +17,10 @@
         "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
     ],
 
+    // VS Code bypasses the image entrypoint, so its socket-group handling
+    // never runs — hand the socket to dev's group here instead (no chmod 666).
+    "postStartCommand": "sudo chgrp dev /var/run/docker.sock || true",
+
     "customizations": {
         "vscode": {
             "extensions": [
