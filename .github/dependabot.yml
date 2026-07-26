@@ -10,5 +10,9 @@ updates:
     commit-message:
       prefix: ci
     groups:
+      # Group only minor/patch bumps so the grouped PR's update-type stays
+      # non-major and auto-merge can engage. Major bumps arrive as separate,
+      # ungrouped PRs for manual review.
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
