@@ -1,0 +1,17 @@
+# Trivy ignore file — scoped, time-boxed suppressions.
+#
+# Only vulnerabilities we cannot fix ourselves belong here: CVEs baked into
+# upstream release binaries where no fixed upstream release exists yet. Each
+# entry carries a reason and a review date. Drop an entry the moment an upstream
+# release rebuilt against the fixed dependency ships and is picked up by
+# scripts/discover-versions.sh.
+
+# CVE-2026-56854 — golang.org/x/crypto/ssh, CRITICAL, fixed in x/crypto 0.55.0.
+# Compiled into the upstream packer and tflint release binaries (currently
+# v1.16.0 / v0.64.0). Both are the LATEST upstream releases and still bundle
+# x/crypto v0.54.0, so there is no newer version for us to pin to — the finding
+# is unfixable from this repo until upstream rebuilds. Without this suppression
+# the CRITICAL gate blocks the entire publish, including Debian OS security
+# patches to the image, over a single third-party binary we do not control.
+# Review: 2026-12-01 — re-check for a rebuilt packer/tflint and remove this line.
+CVE-2026-56854
